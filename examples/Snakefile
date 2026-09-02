@@ -1,9 +1,31 @@
 rule all:
-    input: "out.txt"
+    input: "sum.txt"
 
-rule make:
-    output: "out.txt"
+rule generate:
+    input:
+        script="scripts/step1_generate.py"
+    output: "numbers.txt"
     threads: 1
     resources:
         mem_mb=512
-    shell: "echo hello from the workbench executor > {output}"
+    shell: "python3 {input.script} {output}"
+
+rule square:
+    input:
+        data="numbers.txt",
+        script="scripts/step2_square.py"
+    output: "squares.txt"
+    threads: 1
+    resources:
+        mem_mb=512
+    shell: "python3 {input.script} {input.data} {output}"
+
+rule sum:
+    input:
+        data="squares.txt",
+        script="scripts/step3_sum.py"
+    output: "sum.txt"
+    threads: 1
+    resources:
+        mem_mb=512
+    shell: "python3 {input.script} {input.data} {output}"

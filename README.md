@@ -40,10 +40,27 @@ Python (e.g. `/opt/python/...`) usually isn't, and job containers won't be able 
 
 ## Example
 
+A three-step pipeline (`generate` -> `square` -> `sum`), each step a separate Python script
+declared as an explicit input, so Snakemake's dependency tracking is visible end to end:
+
 ```bash
 mkdir example && cd example
-cp ../examples/Snakefile .
+cp -r ../examples/* .
 snakemake --executor workbench --workbench-cluster <cluster-name> -j1
+```
+
+This submits three Workbench jobs (plus the local `all` aggregator) and produces `sum.txt`
+(`55`, the sum of 1..5 squared).
+
+Edit `scripts/step2_square.py` and rerun the same command: because that script is a declared
+input of the `square` rule (not just referenced in its shell command), Snakemake reruns `square`
+and the downstream `sum`, but *not* `generate` -- `numbers.txt` is untouched and its job is
+skipped:
+
+```
+localrule square: ...
+localrule sum: ...
+localrule all: ...
 ```
 
 Find valid cluster names for `--workbench-cluster`:
