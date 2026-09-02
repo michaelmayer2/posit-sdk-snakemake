@@ -1,0 +1,9 @@
+rule all:
+    input: "out.txt"
+
+rule make:
+    output: "out.txt"
+    threads: 1
+    resources:
+        mem_mb=512
+    shell: "echo hello from the workbench executor > {output}"
