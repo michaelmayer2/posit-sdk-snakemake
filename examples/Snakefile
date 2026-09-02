@@ -5,6 +5,7 @@ rule generate:
     input:
         script="scripts/step1_generate.py"
     output: "numbers.txt"
+    container: "docker://python:3.12-slim"
     threads: 1
     resources:
         mem_mb=512
@@ -15,11 +16,14 @@ rule square:
         data="numbers.txt",
         script="scripts/step2_square.py"
     output: "squares.txt"
+    container: "docker://python:3.11-slim"
     threads: 1
     resources:
         mem_mb=512
     shell: "python3 {input.script} {input.data} {output}"
 
+# No `container:` here -- falls back to whatever --container-image was passed on the CLI
+# (or the plugin's/Snakemake's own default) for this one step.
 rule sum:
     input:
         data="squares.txt",

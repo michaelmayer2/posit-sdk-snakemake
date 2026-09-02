@@ -101,17 +101,9 @@ class Executor(RemoteExecutor):
             self.client = _make_client()
         except ValueError as e:
             raise WorkflowError(f"Failed to configure the Workbench client: {e}") from e
-        self._container = self._resolve_container()
+        self._cluster_supports_containers = self._check_cluster_supports_containers()
 
-    def _resolve_container(self) -> dict[str, str] | None:
-        # `remote_execution_settings.container_image` always has a value (it defaults to the
-        # official snakemake image), so gate on the target cluster actually supporting
-        # containers -- otherwise every job on a non-container cluster (e.g. "Local") would
-        # get an unwanted `container` field.
-        image = self.workflow.remote_execution_settings.container_image
-        if not image:
-            return None
-
+    def _check_cluster_supports_containers(self) -> bool:
         envs = self.client.compute_envs.list()
         cluster = next(
             (
@@ -121,7 +113,29 @@ class Executor(RemoteExecutor):
             ),
             None,
         )
-        if cluster is None or not cluster.get("supportsContainers"):
+        return bool(cluster and cluster.get("supportsContainers"))
+
+    def _resolve_container(self, job: JobExecutorInterface) -> dict[str, str] | None:
+        # Gate on the target cluster actually supporting containers -- otherwise every job
+        # on a non-container cluster (e.g. "Local") would get an unwanted `container` field.
+        if not self._cluster_supports_containers:
+            return None
+
+        # Per-rule `container:` directive in the Snakefile takes priority over the global
+        # `--container-image` default, so different steps of a pipeline can use different
+        # images. `container_img_url` isn't part of the formal JobExecutorInterface (only
+        # `is_containerized` is), so fetch it defensively via getattr.
+        image = None
+        if job.is_containerized:
+            image = getattr(job, "container_img_url", None)
+            if image:
+                # The Snakefile `container:` directive conventionally uses the
+                # apptainer/singularity "docker://" URI scheme; Workbench expects a plain
+                # image reference.
+                image = image.removeprefix("docker://")
+
+        image = image or self.workflow.remote_execution_settings.container_image
+        if not image:
             return None
         return {"image": image}
 
@@ -174,7 +188,7 @@ class Executor(RemoteExecutor):
                 exe="/bin/bash",
                 args=[jobscript],
                 resource_limits=resource_limits or None,
-                container=self._container,
+                container=self._resolve_container(job),
             )
         except WorkbenchError as e:
             self.report_job_error(job_info, msg=str(e))

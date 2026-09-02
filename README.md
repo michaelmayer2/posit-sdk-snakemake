@@ -72,3 +72,12 @@ print([c["name"] for c in Client().compute_envs.list()["clusters"]])
 Note: this assumes a shared filesystem between wherever Snakemake is driven from and wherever
 Workbench runs jobs (the standard Snakemake `RemoteExecutor` assumption) -- see `--container-image`
 if your cluster needs a specific job container image (defaults to the official Snakemake image).
+
+## Container images per step
+
+Add a `container:` directive to any rule to give that step its own image (`generate` and
+`square` in `examples/Snakefile` do this, with two different images); rules without one fall
+back to `--container-image` (or its own default) instead. This only takes effect on clusters
+whose compute env reports `supportsContainers`. `container: "docker://..."` is Snakemake's usual
+apptainer/singularity URI form -- the `docker://` prefix is stripped automatically since
+Workbench expects a plain image reference.
