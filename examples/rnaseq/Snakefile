@@ -1,0 +1,98 @@
+# RNA-seq quantification pipeline, adapted from the canonical nextflow-io/rnaseq-nf tutorial
+# (and the matching examples/rnaseq in posit-sdk-nextflow), to showcase how the `workbench`
+# executor parallelizes work: every rule instance below becomes its own Posit Workbench Job,
+# and Snakemake submits independent jobs concurrently, up to `-j N` at a time.
+#
+#                      +--> fastqc (x N samples) --+
+#   reads (N samples) -+                           +--> multiqc
+#                      +--> quant  (x N samples) --+
+#                              ^
+#   transcriptome --> index ---+  (one index, reused by every quant job)
+#
+# With the default 4 samples: `index` and all 4 `fastqc` jobs start immediately (5 concurrent
+# jobs), the 4 `quant` jobs start as soon as `index` finishes, and `multiqc` waits for all 8
+# per-sample results (fan-in). The downloads run locally on the driver, not as Workbench Jobs.
+#
+# Override the defaults with --config, e.g. `--config samples=gut,liver`.
+
+DATA_URL = config.get(
+    "data_url", "https://raw.githubusercontent.com/nextflow-io/rnaseq-nf/master/data/ggal"
+)
+TRANSCRIPTOME = config.get("transcriptome", "ggal_1_48850000_49020000.Ggal71.500bpflank.fa")
+SAMPLES = str(config.get("samples", "gut,liver,lung,spleen")).split(",")
+
+SALMON = "docker://quay.io/biocontainers/salmon:1.10.3--h6dccd9a_2"
+FASTQC = "docker://quay.io/biocontainers/fastqc:0.12.1--hdfd78af_0"
+MULTIQC = "docker://quay.io/biocontainers/multiqc:1.32--pyhdfd78af_0"
+
+localrules: all, download_transcriptome, download_reads
+
+
+rule all:
+    input: "results/multiqc_report.html"
+
+
+rule download_transcriptome:
+    output: "data/transcriptome.fa"
+    shell: "curl -fsSL -o {output} {DATA_URL}/{TRANSCRIPTOME}"
+
+
+rule download_reads:
+    output: "data/ggal_{sample}_{read}.fq"
+    wildcard_constraints:
+        read="[12]"
+    shell: "curl -fsSL -o {output} {DATA_URL}/ggal_{wildcards.sample}_{wildcards.read}.fq"
+
+
+rule index:
+    input: "data/transcriptome.fa"
+    output: directory("results/index")
+    container: SALMON
+    threads: 2
+    resources:
+        mem_mb=2048
+    shell: "salmon index --threads {threads} -t {input} -i {output}"
+
+
+rule fastqc:
+    input:
+        r1="data/ggal_{sample}_1.fq",
+        r2="data/ggal_{sample}_2.fq",
+    output: directory("results/fastqc/{sample}")
+    container: FASTQC
+    threads: 1
+    resources:
+        mem_mb=1024
+    # FastQC is Java, and Java takes `user.home` from the passwd entry rather than $HOME -- the
+    # job container has none for the LDAP uid, so it'd fall back to a literal `?` directory in
+    # the working directory. Point it at the $HOME the plugin exports instead.
+    shell:
+        "export JAVA_TOOL_OPTIONS=-Duser.home=$HOME && mkdir -p {output} && "
+        "fastqc --threads {threads} --quiet --outdir {output} {input.r1} {input.r2}"
+
+
+rule quant:
+    input:
+        index="results/index",
+        r1="data/ggal_{sample}_1.fq",
+        r2="data/ggal_{sample}_2.fq",
+    output: directory("results/quant/{sample}")
+    container: SALMON
+    threads: 2
+    resources:
+        mem_mb=2048
+    shell:
+        "salmon quant --threads {threads} --libType A -i {input.index} "
+        "-1 {input.r1} -2 {input.r2} -o {output}"
+
+
+rule multiqc:
+    input:
+        expand("results/quant/{sample}", sample=SAMPLES),
+        expand("results/fastqc/{sample}", sample=SAMPLES),
+    output: "results/multiqc_report.html"
+    container: MULTIQC
+    threads: 1
+    resources:
+        mem_mb=1024
+    shell: "multiqc --force --outdir results --filename multiqc_report.html {input}"

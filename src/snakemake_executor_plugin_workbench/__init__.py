@@ -123,16 +123,20 @@ class Executor(RemoteExecutor):
 
         # Per-rule `container:` directive in the Snakefile takes priority over the global
         # `--container-image` default, so different steps of a pipeline can use different
-        # images. `container_img_url` isn't part of the formal JobExecutorInterface (only
-        # `is_containerized` is), so fetch it defensively via getattr.
-        image = None
-        if job.is_containerized:
-            image = getattr(job, "container_img_url", None)
-            if image:
-                # The Snakefile `container:` directive conventionally uses the
-                # apptainer/singularity "docker://" URI scheme; Workbench expects a plain
-                # image reference.
-                image = image.removeprefix("docker://")
+        # images. The image becomes the Workbench job's own (pod) container and the rule runs
+        # natively inside it -- no apptainer/singularity, so no `--sdm apptainer` needed.
+        #
+        # Deliberately not gated on `job.is_containerized`: Snakemake only sets that for the
+        # `containerized:` directive (pre-built conda envs), never for `container:` --
+        # confirmed live, gating on it silently ran every rule in `--container-image`
+        # instead. `container_img_url` isn't part of the formal JobExecutorInterface, so
+        # fetch it defensively via getattr.
+        image = getattr(job, "container_img_url", None)
+        if image:
+            # The Snakefile `container:` directive conventionally uses the
+            # apptainer/singularity "docker://" URI scheme; Workbench expects a plain
+            # image reference.
+            image = image.removeprefix("docker://")
 
         image = image or self.workflow.remote_execution_settings.container_image
         if not image:
@@ -214,9 +218,17 @@ class Executor(RemoteExecutor):
                     yield job_info
                     continue
 
-                if status.get("status") == "Finished" and status.get("exitCode") in (0, None):
+                state = status.get("status")
+                if state == "Finished" and status.get("exitCode") in (0, None):
                     self.report_job_success(job_info)
-                elif status.get("status") in _TERMINAL_FAILURE_STATUSES:
+                elif state == "Finished":
+                    # Without this branch a non-zero exit is neither success nor a terminal
+                    # failure status, so the job was yielded back as active forever --
+                    # confirmed live: the workflow hung instead of failing.
+                    self.report_job_error(
+                        job_info, msg=f"Workbench job exited with code {status.get('exitCode')}"
+                    )
+                elif state in _TERMINAL_FAILURE_STATUSES:
                     self.report_job_error(job_info, msg=status.get("statusMessage"))
                 else:
                     yield job_info

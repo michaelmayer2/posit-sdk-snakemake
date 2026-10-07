@@ -73,11 +73,24 @@ Note: this assumes a shared filesystem between wherever Snakemake is driven from
 Workbench runs jobs (the standard Snakemake `RemoteExecutor` assumption) -- see `--container-image`
 if your cluster needs a specific job container image (defaults to the official Snakemake image).
 
+### RNA-seq example (parallelism)
+
+[`examples/rnaseq/`](examples/rnaseq/README.md) is a more realistic pipeline: Salmon index,
+then FastQC + Salmon quant for each of 4 samples, then MultiQC. It's a port of the same example
+in `posit-sdk-nextflow`. It runs 10 Workbench Jobs, with up to 8 at a time:
+
+```bash
+cd examples/rnaseq
+snakemake          # executor, cluster, -j and --latency-wait come from profiles/default/config.yaml
+```
+
 ## Container images per step
 
 Add a `container:` directive to any rule to give that step its own image (`generate` and
 `square` in `examples/Snakefile` do this, with two different images); rules without one fall
 back to `--container-image` (or its own default) instead. This only takes effect on clusters
-whose compute env reports `supportsContainers`. `container: "docker://..."` is Snakemake's usual
+whose compute env reports `supportsContainers`. The image becomes the Workbench job's own
+container and the rule runs natively inside it, so no `--software-deployment-method apptainer`
+is needed (apptainer couldn't run inside a Kubernetes job pod anyway). `container: "docker://..."` is Snakemake's usual
 apptainer/singularity URI form -- the `docker://` prefix is stripped automatically since
 Workbench expects a plain image reference.

@@ -1,0 +1,9 @@
+# Workflow profile -- picked up automatically by `snakemake` run from this directory
+# (any of these can be overridden on the command line, e.g. `-j 2`).
+executor: workbench
+workbench-cluster: Kubernetes
+# Maximum number of Workbench Jobs running at once (the counterpart of Nextflow's queueSize).
+jobs: 10
+# Shared filesystems (NFS) can take a while to show a job's outputs to the driver; Snakemake's
+# 5 s default failed a successful job with MissingOutputException in testing.
+latency-wait: 60
